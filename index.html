@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>出欠管理</title>
+<style>
+body{font-family:sans-serif;margin:0;background:#e8f1ff;}
+header{background:#4a90e2;color:white;padding:12px;text-align:center;font-size:20px;}
+.page{padding:15px;}
+.card{background:white;border-radius:12px;padding:12px;margin-bottom:12px;box-shadow:0 2px 6px rgba(0,0,0,0.15);}
+button{background:#4a90e2;color:white;border:none;padding:6px 10px;border-radius:6px;margin:2px;font-size:12px;}
+input,select{padding:6px;border-radius:6px;border:1px solid #ccc;}
+table{width:100%;border-collapse:collapse;}
+th,td{border:1px solid #ccc;text-align:center;padding:4px;font-size:12px;}
+.del{background:#ff6b6b;}
+</style>
+</head>
+<body>
+<header>出欠管理</header>
+<div id="app"></div>
+<script>
+let db={},user="";
+
+function save(){localStorage.setItem("attendDB",JSON.stringify(db));}
+function load(){db=JSON.parse(localStorage.getItem("attendDB")||"{}");}
+
+function loginPage(){
+document.getElementById("app").innerHTML=`
+<div class="page">
+<div class="card">
+<h3>名前入力</h3>
+<input id="nameInput" placeholder="名前"/>
+<button onclick="login()">ログイン</button>
+</div></div>`;
+}
+
+function login(){
+const name=document.getElementById("nameInput").value.trim();
+if(!name)return;
+user=name;
+load();
+if(!db[user]) db[user]={timetable:{},records:{},stats:{},credits:{}};
+save(); home();
+}
+
+function home(){
+document.getElementById("app").innerHTML=`
+<div class="page">
+
+<div class="card">
+<h3>時間割（月〜金 9〜12限）</h3>
+<table id="timeTable"></table>
+<button onclick="saveTable()">保存</button>
+</div>
+
+<div class="card">
+<h3>欠席入力</h3>
+<input type="date" id="date">
+<select id="period">
+<option value="9">9限</option>
+<option value="10">10限</option>
+<option value="11">11限</option>
+<option value="12">12限</option>
+</select>
+<select id="status">
+<option value="late">遅刻</option>
+<option value="absent">欠席</option>
+</select>
+<button onclick="mark()">記録</button>
+</div>
+
+<div class="card">
+<h3>科目一覧（欠席通算・ボーダー）</h3>
+<div id="stats"></div>
+</div>
+
+<div class="card">
+<h3>履歴</h3>
+<div id="history"></div>
+</div>
+
+</div>`;
+buildTable(); showStats(); showHistory();
+}
+
+function buildTable(){
+const days=["月","火","水","木","金"];
+let html="<tr><th></th>";
+days.forEach(d=>html+=`<th>${d}</th>`); html+="</tr>";
+for(let p=9;p<=12;p++){
+html+=`<tr><th>${p}限</th>`;
+for(let d=0;d<5;d++){
+const key=d+"-"+p;
+const val=db[user].timetable[key]||"";
+html+=`<td><input value="${val}" id="tb_${key}" /></td>`;
+}
+html+="</tr>";
+}
+document.getElementById("timeTable").innerHTML=html;
+}
+
+function saveTable(){
+for(let d=0;d<5;d++){
+for(let p=9;p<=12;p++){
+const key=d+"-"+p;
+db[user].timetable[key]=document.getElementById("tb_"+key).value;
+}}
+save(); alert("保存OK");
+}
+
+function mark(){
+const date=document.getElementById("date").value;
+const period=document.getElementById("period").value;
+const status=document.getElementById("status").value;
+if(!date)return;
+
+const day=(new Date(date).getDay()+6)%7;
+if(day>4)return alert("月〜金のみ");
+
+const subject=db[user].timetable[day+"-"+period];
+if(!subject)return alert("科目なし");
+
+if(!db[user].records[subject]) db[user].records[subject]=[];
+db[user].records[subject].push({date,status});
+
+if(!db[user].stats[subject]) db[user].stats[subject]={late:0,absent:0,total:0};
+
+if(status==="late"){
+db[user].stats[subject].late++;
+if(db[user].stats[subject].late%3===0) db[user].stats[subject].total++;
+}
+if(status==="absent"){
+db[user].stats[subject].absent++;
+db[user].stats[subject].total++;
+}
+
+save(); showStats(); showHistory();
+}
+
+function jp(s){return s==="late"?"遅刻":"欠席";}
+
+function showStats(){
+let html="";
+for(const s in db[user].stats){
+const st=db[user].stats[s];
+const credit=db[user].credits[s]||0;
+const border=credit*7;
+const remain=border-st.total;
+html+=`
+<b>${s}</b><br>
+単位：<input type="number" value="${credit}" style="width:60px"
+onchange="setCredit('${s}',this.value)">　
+欠席 ${st.absent} ／ 欠席通算 ${st.total} ／
+ボーダー ${border||"-"} ／ 残り ${credit?remain:"-"}
+<br><br>`;
+}
+document.getElementById("stats").innerHTML=html||"なし";
+}
+
+function setCredit(sub,val){
+db[user].credits[sub]=Number(val);
+save(); showStats();
+}
+
+function showHistory(){
+let html="";
+for(const s in db[user].records){
+html+=`<b>${s}</b><br>`;
+db[user].records[s].forEach((r,i)=>{
+html+=`${r.date} ： ${jp(r.status)}
+<button class="del" onclick="delRec('${s}',${i})">削除</button><br>`;
+});
+html+="<br>";
+}
+document.getElementById("history").innerHTML=html||"なし";
+}
+
+function delRec(sub,i){
+const rec=db[user].records[sub][i];
+db[user].records[sub].splice(i,1);
+
+if(rec.status==="late"){
+db[user].stats[sub].late--;
+}else{
+db[user].stats[sub].absent--;
+db[user].stats[sub].total--;
+}
+
+db[user].stats[sub].total=Math.floor(db[user].stats[sub].late/3)+db[user].stats[sub].absent;
+
+save(); showStats(); showHistory();
+}
+
+loginPage();
+</script>
+</body>
+</html>
+:::
+
